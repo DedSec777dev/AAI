@@ -1,0 +1,1688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkyPulse — Live Flight Operations Dashboard</title>
+    <meta name="description" content="Real-time flight operations dashboard for India with simulated ADS-B tracking, AI-powered delay predictions, live weather radar, and airline reliability scoring." />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+    <!-- Leaflet.js CSS + JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <style>
+        /* ══════════════════════════════════════════════════════════════════
+           DESIGN TOKENS
+           ══════════════════════════════════════════════════════════════════ */
+        :root {
+            --navy:    #0a0f1e;
+            --panel:   #0f1629;
+            --card:    #141b2d;
+            --card2:   #182035;
+            --border:  #1e293b;
+            --border2: #283548;
+            --blue:    #00a3e0;
+            --cyan:    #06b6d4;
+            --glow:    #38bdf8;
+            --muted:   #475569;
+            --text:    #cbd5e1;
+            --heading: #f1f5f9;
+            --green:   #4ade80;
+            --amber:   #fbbf24;
+            --red:     #f87171;
+            --radius:  10px;
+        }
+
+        /* ── Reset & Base ── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: var(--navy);
+            color: var(--text);
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--navy); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+        /* ══════════════════════════════════════════════════════════════════
+           HEADER
+           ══════════════════════════════════════════════════════════════════ */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 24px;
+            background: var(--panel);
+            border-bottom: 1px solid var(--border);
+            position: relative;
+            z-index: 1001;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-icon {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--blue), #0891b2);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 2px 12px rgba(0,163,224,0.25);
+            flex-shrink: 0;
+        }
+        .logo-icon svg { width: 16px; height: 16px; display: block; }
+        .logo-text h1 {
+            font-size: 16px; font-weight: 800;
+            color: var(--heading); line-height: 1;
+            letter-spacing: -0.02em;
+        }
+        .logo-text h1 span { color: var(--blue); }
+        .logo-text p {
+            font-size: 9px; font-weight: 600;
+            color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.18em; margin-top: 2px;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header-pill {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            font-size: 11px; color: var(--muted);
+            white-space: nowrap;
+        }
+        .header-pill.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .header-pill.clickable:hover {
+            border-color: var(--border2);
+            color: var(--blue);
+        }
+        .header-pill.clickable.active {
+            background: rgba(0,163,224,0.12);
+            border-color: rgba(0,163,224,0.35);
+            color: var(--glow);
+        }
+        .status-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            flex-shrink: 0;
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        .status-dot.green { background: var(--green); }
+        .status-dot.blue  { background: var(--blue); }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════════
+           MAP
+           ══════════════════════════════════════════════════════════════════ */
+        .map-section { position: relative; }
+        #map {
+            width: 100%; height: 62vh; min-height: 420px;
+            background: #070b17;
+        }
+        .leaflet-container { background: #070b17 !important; font-family: 'Inter', sans-serif !important; }
+        .leaflet-control-attribution { display: none !important; }
+        .leaflet-control-zoom { border: none !important; }
+        .leaflet-control-zoom a {
+            background: rgba(15,22,41,0.92) !important;
+            color: #94a3b8 !important;
+            border: 1px solid var(--border) !important;
+            width: 28px !important; height: 28px !important;
+            line-height: 28px !important; font-size: 14px !important;
+        }
+        .leaflet-control-zoom a:hover { background: var(--card) !important; color: var(--blue) !important; }
+        .leaflet-control-zoom-in  { border-radius: 6px 6px 0 0 !important; }
+        .leaflet-control-zoom-out { border-radius: 0 0 6px 6px !important; }
+
+        /* Map fade at bottom */
+        .map-fade {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            height: 60px;
+            background: linear-gradient(to top, var(--navy), transparent);
+            pointer-events: none; z-index: 999;
+        }
+
+        /* Map floating info card */
+        .map-overlay {
+            position: absolute; top: 14px; left: 14px;
+            z-index: 1000; pointer-events: none;
+        }
+        .map-info-box {
+            background: rgba(15,22,41,0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            pointer-events: auto;
+            max-width: 320px;
+        }
+        .map-info-box .label {
+            font-size: 10px; font-weight: 700;
+            color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.12em; margin-bottom: 4px;
+        }
+        .map-info-box .info {
+            font-size: 13px; color: var(--text); line-height: 1.5;
+        }
+
+        /* Map legend */
+        .map-legend {
+            position: absolute; bottom: 70px; left: 14px;
+            z-index: 1000; pointer-events: none;
+        }
+        .map-legend-box {
+            pointer-events: auto;
+            background: rgba(15,22,41,0.90);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 14px;
+            font-size: 10px; color: var(--muted);
+        }
+        .legend-item {
+            display: flex; align-items: center; gap: 5px;
+        }
+        .legend-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .legend-plane-icon {
+            width: 10px; height: 10px; flex-shrink: 0;
+        }
+
+        /* ── Airport marker ── */
+        .airport-marker {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--blue) 40%, rgba(0,163,224,0.25) 100%);
+            border: 1.5px solid rgba(0,163,224,0.6);
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: 0 0 8px rgba(0,163,224,0.3);
+        }
+        .airport-marker:hover {
+            transform: scale(1.6);
+            box-shadow: 0 0 18px rgba(0,163,224,0.6);
+            border-color: var(--glow);
+        }
+        .airport-marker.active {
+            background: radial-gradient(circle, var(--glow) 30%, rgba(56,189,248,0.4) 100%);
+            border-color: #7dd3fc;
+            box-shadow: 0 0 20px rgba(56,189,248,0.6), 0 0 40px rgba(56,189,248,0.15);
+            transform: scale(2);
+            z-index: 1000 !important;
+        }
+        .airport-marker.destination-node {
+            background: radial-gradient(circle, var(--cyan) 40%, rgba(6,182,212,0.2) 100%);
+            border-color: rgba(6,182,212,0.5);
+            animation: destPulse 2s ease-in-out infinite;
+        }
+        @keyframes destPulse {
+            0%, 100% { box-shadow: 0 0 8px rgba(6,182,212,0.2); }
+            50%      { box-shadow: 0 0 18px rgba(6,182,212,0.5); }
+        }
+
+        /* Airport tooltip */
+        .airport-label {
+            background: rgba(10,15,30,0.94) !important;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(30,41,59,0.8) !important;
+            border-radius: 6px !important;
+            padding: 5px 10px !important;
+            color: #e2e8f0 !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.01em;
+            white-space: nowrap !important;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
+        }
+        .airport-label::before { display: none !important; }
+        .airport-label .code { color: var(--blue); font-family: 'JetBrains Mono', monospace; }
+
+        /* Flight path */
+        .flight-path { stroke: var(--blue); stroke-opacity: 0.5; stroke-width: 1.8; fill: none; }
+
+        /* Leaflet popup */
+        .leaflet-popup-content-wrapper {
+            background: rgba(10,15,30,0.95) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius) !important;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6) !important;
+            color: #e2e8f0 !important;
+        }
+        .leaflet-popup-tip { background: rgba(10,15,30,0.95) !important; }
+
+        /* ── Airplane marker ── */
+        .plane-icon {
+            width: 16px; height: 16px;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 1s ease-out;
+            cursor: pointer;
+            filter: drop-shadow(0 0 3px rgba(56,189,248,0.4));
+        }
+        .plane-icon svg {
+            width: 13px; height: 13px;
+            fill: var(--glow);
+            transition: fill 0.3s;
+        }
+        .plane-icon:hover svg {
+            fill: #7dd3fc;
+            filter: drop-shadow(0 0 6px rgba(125,211,252,0.8));
+        }
+        .plane-icon.selected svg {
+            fill: var(--amber);
+            filter: drop-shadow(0 0 6px rgba(251,191,36,0.6));
+        }
+
+        /* ══════════════════════════════════════════════════════════════════
+           SIDEBAR
+           ══════════════════════════════════════════════════════════════════ */
+        .sidebar {
+            position: fixed; top: 0; right: 0; bottom: 0;
+            width: 370px; max-width: 92vw;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
+            z-index: 2000;
+            transform: translateX(100%);
+            transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar.open { transform: translateX(0); }
+        .sidebar-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(20,27,45,0.5);
+            flex-shrink: 0;
+        }
+        .sidebar-header-left {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .sidebar-header-left .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--blue);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        .sidebar-header-left .title {
+            font-size: 11px; font-weight: 700;
+            color: var(--heading); text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+        .sidebar-close-btn {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .sidebar-close-btn:hover {
+            color: var(--red); border-color: rgba(248,113,113,0.3);
+        }
+        .sidebar-close-btn svg { width: 12px; height: 12px; }
+        .sidebar-scroll {
+            flex: 1; overflow-y: auto;
+            padding: 16px 18px;
+        }
+
+        /* Sidebar content blocks */
+        .sb-section { margin-bottom: 16px; }
+        .sb-section-title {
+            font-size: 9px; font-weight: 700;
+            color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.14em;
+            margin-bottom: 10px;
+        }
+        .sb-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+        }
+        .sb-card + .sb-card { margin-top: 10px; }
+        .sb-header-row {
+            display: flex; align-items: center; gap: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 14px;
+        }
+        .sb-icon-box {
+            width: 38px; height: 38px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--blue), var(--cyan));
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .sb-icon-box svg { width: 18px; height: 18px; fill: white; }
+        .sb-icon-box .code-text {
+            font-size: 12px; font-weight: 800; color: white;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .sb-callsign {
+            font-size: 15px; font-weight: 700; color: var(--heading);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .sb-subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+        /* Route display */
+        .sb-route {
+            display: flex; align-items: center; gap: 0;
+            justify-content: space-between;
+        }
+        .sb-route-end { text-align: center; flex: 0 0 auto; }
+        .sb-route-code {
+            font-size: 18px; font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .sb-route-code.origin { color: var(--blue); }
+        .sb-route-code.dest { color: var(--cyan); }
+        .sb-route-city { font-size: 10px; color: var(--muted); margin-top: 2px; }
+        .sb-route-line {
+            flex: 1; display: flex; align-items: center; gap: 0;
+            margin: 0 12px;
+        }
+        .sb-route-line-bar {
+            flex: 1; height: 1px; background: var(--border);
+        }
+        .sb-route-line svg {
+            width: 14px; height: 14px; color: var(--muted);
+            flex-shrink: 0; margin: 0 4px;
+        }
+
+        /* Progress bar */
+        .sb-progress { margin-top: 12px; }
+        .sb-progress-header {
+            display: flex; justify-content: space-between;
+            font-size: 10px; color: var(--muted); margin-bottom: 5px;
+        }
+        .sb-progress-header .val { color: var(--heading); font-weight: 600; }
+        .sb-progress-track {
+            height: 5px; border-radius: 3px;
+            background: var(--border); overflow: hidden;
+        }
+        .sb-progress-fill {
+            height: 100%; border-radius: 3px;
+            background: linear-gradient(90deg, var(--blue), var(--cyan));
+            transition: width 0.6s ease;
+        }
+
+        /* Data grid */
+        .sb-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+        }
+        .sb-grid-item {
+            background: var(--card2);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 10px 12px;
+        }
+        .sb-grid-label {
+            font-size: 9px; font-weight: 700; color: var(--muted);
+            text-transform: uppercase; letter-spacing: 0.1em;
+            margin-bottom: 5px;
+            display: flex; align-items: center; gap: 4px;
+        }
+        .sb-grid-value {
+            font-size: 14px; font-weight: 700; color: var(--heading);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .sb-grid-sub {
+            font-size: 10px; color: var(--muted); margin-top: 2px;
+        }
+
+        /* Weather main display */
+        .sb-weather-main {
+            display: flex; align-items: center; gap: 12px;
+        }
+        .sb-weather-main img {
+            width: 52px; height: 52px;
+        }
+        .sb-weather-temp {
+            font-size: 30px; font-weight: 800; color: var(--heading);
+            line-height: 1;
+        }
+        .sb-weather-desc {
+            font-size: 12px; color: var(--muted);
+            text-transform: capitalize; margin-top: 2px;
+        }
+        .sb-weather-feels {
+            font-size: 10px; color: var(--muted); margin-top: 1px;
+        }
+
+        /* Alert box */
+        .sb-alert {
+            display: flex; align-items: flex-start; gap: 10px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 10px 12px;
+            margin-top: 10px;
+        }
+        .sb-alert.warn { border-color: rgba(251,191,36,0.25); }
+        .sb-alert.danger { border-color: rgba(248,113,113,0.25); background: rgba(248,113,113,0.05); }
+        .sb-alert-icon { font-size: 14px; flex-shrink: 0; line-height: 1; }
+        .sb-alert-title { font-size: 11px; font-weight: 600; }
+        .sb-alert-title.warn { color: var(--amber); }
+        .sb-alert-title.danger { color: var(--red); }
+        .sb-alert-body { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+        /* ══════════════════════════════════════════════════════════════════
+           CONTENT SECTION (below map)
+           ══════════════════════════════════════════════════════════════════ */
+        .content-section {
+            position: relative; z-index: 10;
+            background: var(--navy);
+            padding: 24px 24px 16px;
+        }
+        .content-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* ── Section header with title + sort ── */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .section-title-area {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--heading);
+        }
+        .section-title svg { width: 18px; height: 18px; flex-shrink: 0; }
+        .section-subtitle {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        /* Sort controls */
+        .sort-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sort-label {
+            font-size: 11px;
+            color: var(--muted);
+            margin-right: 2px;
+        }
+        .sort-btn {
+            font-family: 'Inter', sans-serif;
+            font-size: 11px; font-weight: 500;
+            padding: 5px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .sort-btn:hover {
+            color: var(--blue);
+            border-color: var(--border2);
+            background: var(--card2);
+        }
+        .sort-btn.active {
+            color: var(--glow);
+            border-color: rgba(0,163,224,0.3);
+            background: rgba(0,163,224,0.08);
+        }
+
+        /* ── Empty state ── */
+        .empty-state {
+            text-align: center;
+            padding: 48px 20px;
+        }
+        .empty-icon-box {
+            display: inline-flex;
+            align-items: center; justify-content: center;
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            margin-bottom: 16px;
+            animation: float 3s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+        }
+        .empty-icon-box svg { width: 24px; height: 24px; }
+        .empty-title {
+            font-size: 15px; font-weight: 600;
+            color: var(--text); margin-bottom: 6px;
+        }
+        .empty-subtitle {
+            font-size: 12px; color: var(--muted);
+        }
+
+        /* ── Loading shimmer ── */
+        .shimmer-row {
+            height: 48px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: linear-gradient(90deg, var(--card) 25%, var(--border) 50%, var(--card) 75%);
+            background-size: 200% 100%;
+            animation: shimmerSlide 1.8s infinite;
+        }
+        @keyframes shimmerSlide {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ── Flights table ── */
+        .flights-card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--card);
+            overflow: hidden;
+        }
+        .flights-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .flights-table thead th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.15);
+        }
+        .flights-table tbody tr {
+            border-bottom: 1px solid rgba(30,41,59,0.4);
+            transition: background 0.15s ease;
+        }
+        .flights-table tbody tr:last-child { border-bottom: none; }
+        .flights-table tbody tr:hover {
+            background: rgba(0,163,224,0.04);
+        }
+        .flights-table td {
+            padding: 10px 16px;
+            vertical-align: middle;
+        }
+
+        /* Flight number */
+        .flight-number {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600; font-size: 13px;
+            color: var(--heading);
+        }
+
+        /* Airline cell */
+        .airline-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .airline-badge {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 800;
+            color: var(--blue);
+            flex-shrink: 0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .airline-name { color: var(--text); font-size: 13px; }
+
+        /* Time */
+        .dep-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px; color: var(--heading);
+        }
+
+        /* Destination */
+        .dest-code {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600; font-size: 13px;
+            color: var(--blue);
+        }
+        .dest-city {
+            font-size: 11px; color: var(--muted);
+            margin-left: 6px;
+        }
+
+        /* Delay risk bar */
+        .risk-bar-wrap { width: 100%; min-width: 80px; }
+        .risk-pct {
+            font-size: 10px; font-weight: 700;
+            margin-bottom: 3px;
+        }
+        .risk-pct.low    { color: var(--green); }
+        .risk-pct.medium { color: var(--amber); }
+        .risk-pct.high   { color: var(--red); }
+        .risk-track {
+            width: 100%; height: 4px;
+            border-radius: 2px;
+            background: rgba(30,41,59,0.6);
+        }
+        .risk-fill {
+            height: 100%; border-radius: 2px;
+            transition: width 0.8s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .risk-fill.low    { background: var(--green); }
+        .risk-fill.medium { background: var(--amber); }
+        .risk-fill.high   { background: var(--red); }
+
+        /* Reliability badge */
+        .rel-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .rel-badge.green {
+            background: rgba(74,222,128,0.1);
+            color: var(--green);
+            border: 1px solid rgba(74,222,128,0.2);
+        }
+        .rel-badge.amber {
+            background: rgba(251,191,36,0.1);
+            color: var(--amber);
+            border: 1px solid rgba(251,191,36,0.2);
+        }
+        .rel-badge.red {
+            background: rgba(248,113,113,0.1);
+            color: var(--red);
+            border: 1px solid rgba(248,113,113,0.15);
+        }
+
+        /* Status badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .status-badge svg { width: 10px; height: 10px; flex-shrink: 0; }
+        .status-badge.green {
+            background: rgba(34,197,94,0.1);
+            color: var(--green);
+            border: 1px solid rgba(34,197,94,0.2);
+        }
+        .status-badge.amber {
+            background: rgba(245,158,11,0.1);
+            color: var(--amber);
+            border: 1px solid rgba(245,158,11,0.2);
+        }
+        .status-badge.red {
+            background: rgba(239,68,68,0.1);
+            color: var(--red);
+            border: 1px solid rgba(239,68,68,0.15);
+        }
+
+        /* Table footer */
+        .table-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 12px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        /* ══════════════════════════════════════════════════════════════════
+           FOOTER
+           ══════════════════════════════════════════════════════════════════ */
+        .footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px 24px;
+            background: var(--panel);
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        /* ══════════════════════════════════════════════════════════════════
+           ANIMATIONS
+           ══════════════════════════════════════════════════════════════════ */
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(14px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .anim-fade-up {
+            animation: fadeSlideUp 0.4s ease-out forwards;
+        }
+
+        /* ══════════════════════════════════════════════════════════════════
+           UTILITY
+           ══════════════════════════════════════════════════════════════════ */
+        .hidden { display: none !important; }
+
+        /* ══════════════════════════════════════════════════════════════════
+           RESPONSIVE
+           ══════════════════════════════════════════════════════════════════ */
+        @media (max-width: 768px) {
+            .header { padding: 8px 16px; }
+            .content-section { padding: 16px; }
+            .section-header { flex-direction: column; align-items: flex-start; }
+            .flights-table { font-size: 12px; }
+            .flights-table td, .flights-table th { padding: 8px 10px; }
+            .footer { padding: 10px 16px; flex-direction: column; text-align: center; }
+            .header-pill.hide-mobile { display: none; }
+            .sidebar { width: 100vw; }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- HEADER                                                        -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <header class="header" id="main-header">
+        <div class="header-left">
+            <div class="logo-icon">
+                <svg fill="none" stroke="white" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+            </div>
+            <div class="logo-text">
+                <h1>Sky<span>Pulse</span></h1>
+                <p>Flight Operations Dashboard</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="header-pill hide-mobile" id="header-stats" style="display:none">
+                <span class="status-dot green"></span>
+                <span id="header-connection-count">0 connections</span>
+            </div>
+            <div class="header-pill hide-mobile">
+                <span class="status-dot green"></span>
+                <span id="aircraft-counter">0 aircraft</span>
+            </div>
+            <div class="header-pill clickable" id="btn-weather-toggle" title="Toggle Weather Radar">
+                <svg style="width:12px;height:12px;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2 15a7 7 0 0114 0M9 12a3 3 0 016 0m-9 3h12a3 3 0 003-3 5 5 0 00-5-5 5 5 0 00-4.8 3.6A4 4 0 006 15"/></svg>
+                <span>Radar</span>
+            </div>
+            <div class="header-pill" style="font-family:'JetBrains Mono',monospace">
+                <span class="status-dot blue"></span>
+                <span id="live-clock">--:--</span>
+            </div>
+            <div class="header-pill hide-mobile">
+                <span class="status-dot blue"></span>
+                <span>ML Active</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- MAP                                                            -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section class="map-section">
+        <div id="map"></div>
+
+        <!-- Floating info card -->
+        <div class="map-overlay">
+            <div class="map-info-box" id="map-info">
+                <div class="label">Select an Airport or Aircraft</div>
+                <div class="info" id="map-info-text">Click any airport marker or airplane on the map to view outbound flights and delay predictions.</div>
+            </div>
+        </div>
+
+        <!-- Map legend -->
+        <div class="map-legend">
+            <div class="map-legend-box">
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:var(--blue);box-shadow:0 0 4px rgba(0,163,224,0.4)"></div>
+                    <span>Airport</span>
+                </div>
+                <div class="legend-item">
+                    <svg class="legend-plane-icon" viewBox="0 0 24 24" fill="var(--glow)"><path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0011.5 2 1.5 1.5 0 0010 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                    <span>Aircraft</span>
+                </div>
+                <div class="legend-item" id="legend-weather" style="display:none">
+                    <div class="legend-dot" style="background:var(--cyan);border-radius:2px"></div>
+                    <span>Radar</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="map-fade"></div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- SIDEBAR                                                        -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-header-left">
+                <div class="dot"></div>
+                <span class="title" id="sidebar-title">Details</span>
+            </div>
+            <button class="sidebar-close-btn" id="btn-close-sidebar">
+                <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="sidebar-scroll" id="sidebar-content">
+            <!-- Dynamic content injected here -->
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- CONTENT BELOW MAP                                              -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section class="content-section" id="table-section">
+        <div class="content-inner">
+
+            <!-- Section header (hidden until airport selected) -->
+            <div id="table-header" class="hidden">
+                <div class="section-header anim-fade-up">
+                    <div class="section-title-area">
+                        <div class="section-title">
+                            <svg fill="none" stroke="var(--blue)" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                            <span id="table-title">Departures</span>
+                        </div>
+                        <div class="section-subtitle" id="table-subtitle"></div>
+                    </div>
+                    <div class="sort-controls">
+                        <span class="sort-label">Sort:</span>
+                        <button class="sort-btn active" data-sort="time" id="sort-time">Departure</button>
+                        <button class="sort-btn" data-sort="destination" id="sort-dest">Destination</button>
+                        <button class="sort-btn" data-sort="risk" id="sort-risk">Delay Risk</button>
+                        <button class="sort-btn" data-sort="reliability" id="sort-rel">Reliability</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading state -->
+            <div id="table-loading" class="hidden">
+                <div class="shimmer-row"></div>
+                <div class="shimmer-row" style="animation-delay:.12s"></div>
+                <div class="shimmer-row" style="animation-delay:.24s"></div>
+                <div class="shimmer-row" style="animation-delay:.36s"></div>
+                <div class="shimmer-row" style="animation-delay:.48s"></div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="table-empty">
+                <div class="empty-state">
+                    <div class="empty-icon-box">
+                        <svg fill="none" stroke="var(--muted)" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z"/></svg>
+                    </div>
+                    <p class="empty-title">Click an airport on the map above</p>
+                    <p class="empty-subtitle">Flight connections, AI-powered delay predictions, and reliability scores will appear here</p>
+                </div>
+            </div>
+
+            <!-- Flights table -->
+            <div id="table-container" class="hidden">
+                <div class="flights-card">
+                    <table class="flights-table" id="flights-table">
+                        <thead>
+                            <tr>
+                                <th>Flight</th>
+                                <th>Airline</th>
+                                <th>Departure</th>
+                                <th>Destination</th>
+                                <th style="min-width:100px">Delay Risk</th>
+                                <th>Reliability</th>
+                                <th>Prediction</th>
+                            </tr>
+                        </thead>
+                        <tbody id="flights-tbody">
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-footer">
+                    <span id="flight-count-label"></span>
+                    <span>Predictions powered by ML pipeline · Reliability from historical analysis</span>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- FOOTER                                                         -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <footer class="footer">
+        <p>&copy; 2026 SkyPulse &middot; AI Flight Intelligence Platform</p>
+        <p>Predictions are ML-generated estimates · Weather from OpenWeatherMap · ADS-B tracking simulated</p>
+    </footer>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- JAVASCRIPT                                                     -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <script>
+    (() => {
+        "use strict";
+
+        // ── State ──
+        let airports = [];
+        let airportMarkers = {};
+        let flightPaths = [];
+        let activeSource = null;
+        let currentFlights = [];
+        let currentSort = "time";
+
+        // ADS-B
+        let planeMarkers = {};
+        let selectedPlane = null;
+        let planeRouteLine = null;
+
+        // Weather
+        let weatherLayerVisible = false;
+        let weatherTileLayer = null;
+        let rainviewerTimestamp = null;
+
+        // Sidebar
+        let sidebarOpen = false;
+
+        // ── DOM refs ──
+        const mapInfoText       = document.getElementById("map-info-text");
+        const headerStats       = document.getElementById("header-stats");
+        const headerConnCount   = document.getElementById("header-connection-count");
+        const aircraftCounter   = document.getElementById("aircraft-counter");
+        const tableHeader       = document.getElementById("table-header");
+        const tableLoading      = document.getElementById("table-loading");
+        const tableEmpty        = document.getElementById("table-empty");
+        const tableContainer    = document.getElementById("table-container");
+        const tableTitle        = document.getElementById("table-title");
+        const tableSubtitle     = document.getElementById("table-subtitle");
+        const flightsTbody      = document.getElementById("flights-tbody");
+        const flightCountLabel  = document.getElementById("flight-count-label");
+        const sortBtns          = document.querySelectorAll(".sort-btn");
+        const sidebar           = document.getElementById("sidebar");
+        const sidebarTitle      = document.getElementById("sidebar-title");
+        const sidebarContent    = document.getElementById("sidebar-content");
+        const btnCloseSidebar   = document.getElementById("btn-close-sidebar");
+        const btnWeatherToggle  = document.getElementById("btn-weather-toggle");
+        const legendWeather     = document.getElementById("legend-weather");
+        const liveClock         = document.getElementById("live-clock");
+
+        // ── Leaflet map ──
+        const map = L.map("map", {
+            center: [22.5, 79.5],
+            zoom: 5,
+            minZoom: 4,
+            maxZoom: 12,
+            zoomControl: true,
+            attributionControl: false,
+        });
+
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            subdomains: "abcd",
+            maxZoom: 19,
+        }).addTo(map);
+
+        map.zoomControl.setPosition("topright");
+
+        // ── Live clock ──
+        function updateClock() {
+            const now = new Date();
+            liveClock.textContent = now.toLocaleTimeString("en-IN", {
+                hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+                timeZone: "Asia/Kolkata",
+            }) + " IST";
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+
+        // ── Load airports ──
+        async function init() {
+            try {
+                const res = await fetch("/api/airports");
+                airports = await res.json();
+            } catch {
+                console.error("Failed to load airports");
+                return;
+            }
+            airports.forEach(placeAirportMarker);
+            pollAdsb();
+            setInterval(pollAdsb, 3000);
+            fetchRainviewerTimestamp();
+        }
+
+        function placeAirportMarker(airport) {
+            const el = document.createElement("div");
+            el.className = "airport-marker";
+            el.title = `${airport.code} — ${airport.city}`;
+
+            const icon = L.divIcon({
+                html: el.outerHTML,
+                className: "",
+                iconSize: [10, 10],
+                iconAnchor: [5, 5],
+            });
+
+            const marker = L.marker([airport.lat, airport.lon], { icon, zIndexOffset: 100 }).addTo(map);
+
+            marker.bindTooltip(
+                `<span class="code">${airport.code}</span>&nbsp; ${airport.city}`,
+                { className: "airport-label", direction: "top", offset: [0, -10], permanent: false }
+            );
+
+            marker.on("click", () => selectAirport(airport.code));
+            airportMarkers[airport.code] = marker;
+        }
+
+        function getMarkerEl(code) {
+            if (!airportMarkers[code]) return null;
+            const container = airportMarkers[code].getElement();
+            return container ? container.querySelector(".airport-marker") || container : null;
+        }
+
+        // ── Airport selection ──
+        async function selectAirport(code) {
+            deselectPlane();
+            if (activeSource === code) return;
+            clearFlightPaths();
+            clearActiveStates();
+
+            activeSource = code;
+            const airport = airports.find(a => a.code === code);
+            if (!airport) return;
+
+            const el = getMarkerEl(code);
+            if (el) el.classList.add("active");
+
+            mapInfoText.innerHTML = `<strong style="color:var(--heading)">${airport.code}</strong> &middot; ${airport.name}, ${airport.city}`;
+
+            tableHeader.classList.add("hidden");
+            tableContainer.classList.add("hidden");
+            tableEmpty.classList.add("hidden");
+            tableLoading.classList.remove("hidden");
+
+            map.flyTo([airport.lat, airport.lon], 6, { duration: 0.8 });
+
+            // Auto-scroll to table
+            setTimeout(() => {
+                document.getElementById("table-section").scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 500);
+
+            // Fetch weather for sidebar
+            fetchAirportWeather(airport);
+
+            try {
+                const res = await fetch(`/api/get_connections?source_airport=${code}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Failed");
+
+                drawFlightPaths(airport, data.connections);
+
+                data.connections.forEach(dest => {
+                    const destEl = getMarkerEl(dest.code);
+                    if (destEl) destEl.classList.add("destination-node");
+                });
+
+                headerStats.style.display = "flex";
+                headerConnCount.textContent = `${data.connections.length} destinations · ${data.flights.length} flights`;
+
+                currentFlights = data.flights;
+                currentSort = "time";
+                updateSortButtons();
+                renderTable(data.flights, airport);
+
+            } catch (err) {
+                console.error("Connection fetch failed:", err);
+                tableLoading.classList.add("hidden");
+                tableEmpty.classList.remove("hidden");
+                mapInfoText.textContent = "Failed to load connections. Please try again.";
+            }
+        }
+
+        function clearFlightPaths() {
+            flightPaths.forEach(p => map.removeLayer(p));
+            flightPaths = [];
+        }
+
+        function clearActiveStates() {
+            airports.forEach(a => {
+                const el = getMarkerEl(a.code);
+                if (el) el.classList.remove("active", "destination-node");
+            });
+        }
+
+        // ── Draw flight paths ──
+        function drawFlightPaths(source, destinations) {
+            destinations.forEach((dest, idx) => {
+                const points = computeArc([source.lat, source.lon], [dest.lat, dest.lon], 32);
+
+                const polyline = L.polyline(points, {
+                    color: "#00a3e0", weight: 1.8, opacity: 0,
+                    smoothFactor: 1, className: "flight-path",
+                }).addTo(map);
+                flightPaths.push(polyline);
+
+                const glow = L.polyline(points, {
+                    color: "#00a3e0", weight: 5, opacity: 0, smoothFactor: 1,
+                }).addTo(map);
+                flightPaths.push(glow);
+
+                setTimeout(() => {
+                    polyline.setStyle({ opacity: 0.55 });
+                    glow.setStyle({ opacity: 0.08 });
+                }, idx * 60);
+            });
+        }
+
+        function computeArc(start, end, segments) {
+            const points = [];
+            const midLat = (start[0] + end[0]) / 2;
+            const midLon = (start[1] + end[1]) / 2;
+            const dLat = end[0] - start[0];
+            const dLon = end[1] - start[1];
+            const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+            const offset = dist * 0.15;
+            const offsetLat = midLat + (-dLon / dist) * offset;
+            const offsetLon = midLon + (dLat / dist) * offset;
+
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const u = 1 - t;
+                points.push([
+                    u * u * start[0] + 2 * u * t * offsetLat + t * t * end[0],
+                    u * u * start[1] + 2 * u * t * offsetLon + t * t * end[1],
+                ]);
+            }
+            return points;
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // ADS-B PLANE TRACKING
+        // ══════════════════════════════════════════════════════════════
+        const PLANE_SVG = `<svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0011.5 2 1.5 1.5 0 0010 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
+
+        async function pollAdsb() {
+            try {
+                const res = await fetch("/api/adsb");
+                const planes = await res.json();
+                updatePlaneMarkers(planes);
+                aircraftCounter.textContent = `${planes.length} aircraft`;
+            } catch (e) {
+                console.warn("ADS-B poll failed:", e);
+            }
+        }
+
+        function updatePlaneMarkers(planes) {
+            const seen = new Set();
+
+            planes.forEach(ac => {
+                seen.add(ac.callsign);
+                const heading = ac.heading_degrees || 0;
+
+                if (planeMarkers[ac.callsign]) {
+                    const marker = planeMarkers[ac.callsign];
+                    marker.setLatLng(L.latLng(ac.lat, ac.lng));
+
+                    const el = marker.getElement();
+                    if (el) {
+                        const iconEl = el.querySelector('.plane-icon');
+                        if (iconEl) iconEl.style.transform = `rotate(${heading}deg)`;
+                    }
+                    marker._acData = ac;
+                } else {
+                    const isSelected = selectedPlane === ac.callsign;
+                    const icon = L.divIcon({
+                        html: `<div class="plane-icon ${isSelected ? 'selected' : ''}" style="transform: rotate(${heading}deg)">${PLANE_SVG}</div>`,
+                        className: "",
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8],
+                    });
+
+                    const marker = L.marker([ac.lat, ac.lng], { icon, zIndexOffset: 500 }).addTo(map);
+                    marker._acData = ac;
+
+                    marker.bindTooltip(
+                        `<span class="code">${ac.callsign}</span>&nbsp; ${ac.airline_name}<br><span style="font-size:10px;color:#64748b">${ac.origin_code} → ${ac.destination_code} · FL${Math.round(ac.altitude/100)} · ${ac.speed_knots}kts</span>`,
+                        { className: "airport-label", direction: "top", offset: [0, -12], permanent: false }
+                    );
+
+                    marker.on("click", () => selectPlane(ac.callsign));
+                    planeMarkers[ac.callsign] = marker;
+                }
+            });
+
+            Object.keys(planeMarkers).forEach(cs => {
+                if (!seen.has(cs)) {
+                    map.removeLayer(planeMarkers[cs]);
+                    delete planeMarkers[cs];
+                }
+            });
+        }
+
+        // ── Plane selection → sidebar ──
+        async function selectPlane(callsign) {
+            deselectPlane();
+            selectedPlane = callsign;
+
+            const marker = planeMarkers[callsign];
+            if (marker) {
+                const el = marker.getElement();
+                if (el) {
+                    const iconEl = el.querySelector('.plane-icon');
+                    if (iconEl) iconEl.classList.add('selected');
+                }
+            }
+
+            try {
+                const res = await fetch(`/api/adsb/${callsign}`);
+                const ac = await res.json();
+                if (!res.ok) return;
+
+                if (ac.route_path && ac.route_path.length > 1) {
+                    planeRouteLine = L.polyline(ac.route_path, {
+                        color: "#fbbf24", weight: 2, opacity: 0.6,
+                        dashArray: "8 4", smoothFactor: 1,
+                    }).addTo(map);
+                }
+
+                mapInfoText.innerHTML = `<strong style="color:var(--amber)">${ac.callsign}</strong> &middot; ${ac.airline_name} ${ac.flight_number} &middot; ${ac.origin_code} → ${ac.destination_code}`;
+
+                const compassDir = getCompassDir(ac.heading_degrees);
+
+                openSidebar("Aircraft Detail", `
+                    <div class="sb-section">
+                        <div class="sb-header-row">
+                            <div class="sb-icon-box">
+                                <svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:white"><path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0011.5 2 1.5 1.5 0 0010 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                            </div>
+                            <div>
+                                <div class="sb-callsign">${ac.callsign}</div>
+                                <div class="sb-subtitle">${ac.airline_name} · ${ac.flight_number}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sb-section">
+                        <div class="sb-section-title">Route</div>
+                        <div class="sb-card">
+                            <div class="sb-route">
+                                <div class="sb-route-end">
+                                    <div class="sb-route-code origin">${ac.origin_code}</div>
+                                    <div class="sb-route-city">${ac.origin_city}</div>
+                                </div>
+                                <div class="sb-route-line">
+                                    <div class="sb-route-line-bar"></div>
+                                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                                    <div class="sb-route-line-bar"></div>
+                                </div>
+                                <div class="sb-route-end">
+                                    <div class="sb-route-code dest">${ac.destination_code}</div>
+                                    <div class="sb-route-city">${ac.destination_city}</div>
+                                </div>
+                            </div>
+                            <div class="sb-progress">
+                                <div class="sb-progress-header">
+                                    <span>Progress</span>
+                                    <span class="val">${ac.progress_pct}%</span>
+                                </div>
+                                <div class="sb-progress-track">
+                                    <div class="sb-progress-fill" style="width:${ac.progress_pct}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sb-section">
+                        <div class="sb-section-title">Flight Data</div>
+                        <div class="sb-grid">
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">↕ Altitude</div>
+                                <div class="sb-grid-value">FL${Math.round(ac.altitude/100)}</div>
+                                <div class="sb-grid-sub">${ac.altitude.toLocaleString()} ft</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">→ Speed</div>
+                                <div class="sb-grid-value">${ac.speed_knots} kts</div>
+                                <div class="sb-grid-sub">${Math.round(ac.speed_knots * 1.852)} km/h</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">◎ Heading</div>
+                                <div class="sb-grid-value">${ac.heading_degrees}°</div>
+                                <div class="sb-grid-sub">${compassDir}</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">⊕ Position</div>
+                                <div class="sb-grid-value">${ac.lat}°</div>
+                                <div class="sb-grid-sub">${ac.lng}°E</div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+
+            } catch (e) {
+                console.warn("Failed to fetch aircraft detail:", e);
+            }
+        }
+
+        function getCompassDir(deg) {
+            const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+            return dirs[Math.round(deg / 22.5) % 16];
+        }
+
+        function deselectPlane() {
+            if (selectedPlane && planeMarkers[selectedPlane]) {
+                const el = planeMarkers[selectedPlane].getElement();
+                if (el) {
+                    const iconEl = el.querySelector('.plane-icon');
+                    if (iconEl) iconEl.classList.remove('selected');
+                }
+            }
+            selectedPlane = null;
+            if (planeRouteLine) {
+                map.removeLayer(planeRouteLine);
+                planeRouteLine = null;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // WEATHER OVERLAY
+        // ══════════════════════════════════════════════════════════════
+
+        async function fetchRainviewerTimestamp() {
+            try {
+                const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+                const data = await res.json();
+                if (data.radar && data.radar.past && data.radar.past.length > 0) {
+                    rainviewerTimestamp = data.radar.past[data.radar.past.length - 1].path;
+                }
+            } catch (e) {
+                console.warn("RainViewer fetch failed:", e);
+            }
+        }
+
+        function toggleWeatherLayer() {
+            weatherLayerVisible = !weatherLayerVisible;
+            btnWeatherToggle.classList.toggle("active", weatherLayerVisible);
+            legendWeather.style.display = weatherLayerVisible ? "flex" : "none";
+
+            if (weatherLayerVisible) {
+                if (!weatherTileLayer && rainviewerTimestamp) {
+                    weatherTileLayer = L.tileLayer(
+                        `https://tilecache.rainviewer.com${rainviewerTimestamp}/256/{z}/{x}/{y}/2/1_1.png`,
+                        { opacity: 0.45, zIndex: 400, maxZoom: 12 }
+                    ).addTo(map);
+                } else if (weatherTileLayer) {
+                    weatherTileLayer.addTo(map);
+                }
+            } else {
+                if (weatherTileLayer) map.removeLayer(weatherTileLayer);
+            }
+        }
+
+        btnWeatherToggle.addEventListener("click", toggleWeatherLayer);
+
+        // Refresh RainViewer every 5 minutes
+        setInterval(async () => {
+            await fetchRainviewerTimestamp();
+            if (weatherLayerVisible && weatherTileLayer && rainviewerTimestamp) {
+                map.removeLayer(weatherTileLayer);
+                weatherTileLayer = L.tileLayer(
+                    `https://tilecache.rainviewer.com${rainviewerTimestamp}/256/{z}/{x}/{y}/2/1_1.png`,
+                    { opacity: 0.45, zIndex: 400, maxZoom: 12 }
+                ).addTo(map);
+            }
+        }, 300000);
+
+        // ── Airport Weather Card ──
+        async function fetchAirportWeather(airport) {
+            try {
+                const res = await fetch(`/api/weather?lat=${airport.lat}&lon=${airport.lon}`);
+                const wx = await res.json();
+                if (!res.ok) throw new Error(wx.error || "Failed");
+
+                const windDir = getCompassDir(wx.wind_deg || 0);
+                const iconUrl = `https://openweathermap.org/img/wn/${wx.icon}@2x.png`;
+
+                let alertsHtml = '';
+                if (wx.wind_gust_kmh) {
+                    alertsHtml += `
+                        <div class="sb-alert warn">
+                            <div class="sb-alert-icon">⚠️</div>
+                            <div>
+                                <div class="sb-alert-title warn">Wind Gusts Detected</div>
+                                <div class="sb-alert-body">Gusts up to ${wx.wind_gust_kmh} km/h</div>
+                            </div>
+                        </div>`;
+                }
+                if (wx.is_severe) {
+                    alertsHtml += `
+                        <div class="sb-alert danger">
+                            <div class="sb-alert-icon">⛈️</div>
+                            <div>
+                                <div class="sb-alert-title danger">Severe Weather Alert</div>
+                                <div class="sb-alert-body">Active precipitation detected. Possible flight impact.</div>
+                            </div>
+                        </div>`;
+                }
+
+                openSidebar("Airport Weather", `
+                    <div class="sb-section">
+                        <div class="sb-header-row">
+                            <div class="sb-icon-box">
+                                <span class="code-text">${airport.code}</span>
+                            </div>
+                            <div>
+                                <div class="sb-callsign" style="font-family:'Inter',sans-serif;font-size:14px">${airport.name}</div>
+                                <div class="sb-subtitle">${airport.city}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sb-section">
+                        <div class="sb-section-title">Current Conditions</div>
+                        <div class="sb-card">
+                            <div class="sb-weather-main">
+                                <img src="${iconUrl}" alt="${wx.description}" />
+                                <div>
+                                    <div class="sb-weather-temp">${wx.temp_c}°C</div>
+                                    <div class="sb-weather-desc">${wx.description}</div>
+                                    <div class="sb-weather-feels">Feels like ${wx.feels_like_c}°C</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sb-section">
+                        <div class="sb-section-title">Details</div>
+                        <div class="sb-grid">
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">👁 Visibility</div>
+                                <div class="sb-grid-value">${wx.visibility_km} km</div>
+                                <div class="sb-grid-sub">${wx.visibility_km < 5 ? '⚠ Reduced' : 'Good'}</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">💨 Wind</div>
+                                <div class="sb-grid-value">${wx.wind_speed_kmh} km/h</div>
+                                <div class="sb-grid-sub">${windDir} (${wx.wind_deg}°)</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">💧 Humidity</div>
+                                <div class="sb-grid-value">${wx.humidity}%</div>
+                                <div class="sb-grid-sub">${wx.pressure_hpa} hPa</div>
+                            </div>
+                            <div class="sb-grid-item">
+                                <div class="sb-grid-label">☁ Clouds</div>
+                                <div class="sb-grid-value">${wx.clouds_pct}%</div>
+                                <div class="sb-grid-sub">${wx.clouds_pct > 75 ? 'Overcast' : wx.clouds_pct > 40 ? 'Partly Cloudy' : 'Clear'}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${alertsHtml ? `<div class="sb-section">${alertsHtml}</div>` : ''}
+                `);
+
+            } catch (e) {
+                console.warn("Weather fetch failed:", e);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════
+        // SIDEBAR
+        // ══════════════════════════════════════════════════════════════
+        function openSidebar(title, html) {
+            sidebarTitle.textContent = title;
+            sidebarContent.innerHTML = html;
+            sidebar.classList.add("open");
+            sidebarOpen = true;
+        }
+
+        function closeSidebar() {
+            sidebar.classList.remove("open");
+            sidebarOpen = false;
+            deselectPlane();
+        }
+
+        btnCloseSidebar.addEventListener("click", closeSidebar);
+        document.addEventListener("keydown", e => {
+            if (e.key === "Escape" && sidebarOpen) closeSidebar();
+        });
+
+        // ══════════════════════════════════════════════════════════════
+        // FLIGHTS TABLE
+        // ══════════════════════════════════════════════════════════════
+        function renderTable(flights, source) {
+            tableLoading.classList.add("hidden");
+            tableEmpty.classList.add("hidden");
+            tableHeader.classList.remove("hidden");
+            tableContainer.classList.remove("hidden");
+
+            tableTitle.textContent = `Departures from ${source.code}`;
+            tableSubtitle.textContent = `${source.name}, ${source.city} — ${flights.length} scheduled flights`;
+            flightCountLabel.textContent = `Showing ${flights.length} flight${flights.length !== 1 ? "s" : ""}`;
+
+            flightsTbody.innerHTML = flights.map((f, i) => {
+                const riskClass = f.delay_probability < 0.3 ? "low" : f.delay_probability < 0.7 ? "medium" : "high";
+                const pct = Math.round(f.delay_probability * 100);
+                const relScore = f.reliability_score || 0;
+                const relColor = f.reliability_color || "green";
+
+                return `
+                <tr class="anim-fade-up" style="animation-delay:${i * 30}ms; opacity:0">
+                    <td><span class="flight-number">${f.flight_number}</span></td>
+                    <td>
+                        <div class="airline-cell">
+                            <div class="airline-badge">${f.airline_code}</div>
+                            <span class="airline-name">${f.airline}</span>
+                        </div>
+                    </td>
+                    <td><span class="dep-time">${formatTime(f.departure_time)}</span></td>
+                    <td>
+                        <span class="dest-code">${f.destination_code}</span>
+                        <span class="dest-city">${f.destination_city}</span>
+                    </td>
+                    <td>
+                        <div class="risk-bar-wrap">
+                            <div class="risk-pct ${riskClass}">${pct}%</div>
+                            <div class="risk-track">
+                                <div class="risk-fill ${riskClass}" style="width:${pct}%"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="rel-badge ${relColor}">${relScore.toFixed(1)}%</span>
+                    </td>
+                    <td>${statusBadge(f)}</td>
+                </tr>`;
+            }).join("");
+        }
+
+        // ── Sorting ──
+        sortBtns.forEach(btn => {
+            btn.addEventListener("click", () => {
+                const key = btn.dataset.sort;
+                if (currentSort === key || !currentFlights.length) return;
+                currentSort = key;
+                updateSortButtons();
+
+                const sorted = [...currentFlights];
+                if (key === "time") sorted.sort((a, b) => a.departure_time.localeCompare(b.departure_time));
+                else if (key === "destination") sorted.sort((a, b) => a.destination_code.localeCompare(b.destination_code));
+                else if (key === "risk") sorted.sort((a, b) => b.delay_probability - a.delay_probability);
+                else if (key === "reliability") sorted.sort((a, b) => (a.reliability_score || 0) - (b.reliability_score || 0));
+
+                const source = airports.find(a => a.code === activeSource);
+                renderTable(sorted, source);
+            });
+        });
+
+        function updateSortButtons() {
+            sortBtns.forEach(btn => {
+                btn.classList.toggle("active", btn.dataset.sort === currentSort);
+            });
+        }
+
+        // ── Formatting ──
+        function formatTime(t) {
+            const [h, m] = t.split(":").map(Number);
+            const ampm = h >= 12 ? "PM" : "AM";
+            return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${ampm}`;
+        }
+
+        function statusBadge(f) {
+            const cls = f.status_color;
+            let iconPath;
+            if (cls === "green")
+                iconPath = `<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>`;
+            else if (cls === "amber")
+                iconPath = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01"/>`;
+            else
+                iconPath = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z"/>`;
+
+            return `<span class="status-badge ${cls}"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">${iconPath}</svg>${f.status}</span>`;
+        }
+
+        // ── Boot ──
+        init();
+    })();
+    </script>
+</body>
+</html>
